@@ -48,7 +48,29 @@ def latest_receipt(logs):
     return {k: int(v) for k, v in METRIC.findall(matches[-1]) if v.isdecimal()}
 
 
-def summarize(user, apps, statuses, llm_receipt):
+def memory_receipt_summary(logs):
+    """Count and max over available memory receipts, NOT an all-time peak."""
+    if not isinstance(logs, str):
+        return None
+    samples=[]
+    for row in RECEIPT.findall(logs):
+        nums={k:int(v) for k,v in METRIC.findall(row) if v.isdecimal()}
+        if "current_mb" in nums:
+            samples.append(nums)
+    if not samples:
+        return None
+    result={"observations":len(samples),
+            "max_observed_current_mb":max(x["current_mb"] for x in samples)}
+    peaks=[x["peak_mb"] for x in samples if "peak_mb" in x]
+    if peaks:
+        result["max_reported_peak_mb"]=max(peaks)
+    ooms=[x["oom_kills"] for x in samples if "oom_kills" in x]
+    if ooms:
+        result["max_reported_oom_kills"]=max(ooms)
+    return result
+
+
+def summarize(user, apps, statuses, llm_receipt, llm_history=None):
     total, allocated = user.get("totalRamMb"), user.get("ramUsedMb")
     if type(total) is not int or type(allocated) is not int or not 0 <= allocated <= total:
         raise ValueError("Discloud account RAM unavailable")
@@ -78,6 +100,10 @@ def summarize(user, apps, statuses, llm_receipt):
                             if k in llm_receipt))
     else:
         out.append("LFM3 peak memory receipt: not available in the retrieved log")
+    if llm_history:
+        out.append("LFM3 log-based memory history: " +
+                   " ".join(f"{k}={v}" for k,v in llm_history.items()) +
+                   " (only available log entries, not 14-day peak)")
     out.append("A single current usage reading is NOT enough to authorize memory reductions.")
     return out
 
@@ -90,7 +116,7 @@ def main():
     apps = api_get(token, "/app/all").get("apps")
     if not isinstance(user, dict) or not isinstance(apps, list):
         raise SystemExit("Incomplete RAM/account inventory")
-    statuses, receipt = {}, None
+    statuses, receipt, llm_history = {}, None, None
     for app in apps:
         name, app_id = app.get("name"), app.get("id")
         if (name not in KNOWN or not isinstance(app_id, str)
@@ -109,9 +135,10 @@ def main():
                 terminal = result.get("terminal") if isinstance(result, dict) else None
                 if isinstance(terminal, dict):
                     receipt = latest_receipt(terminal.get("big"))
+                    llm_history = memory_receipt_summary(terminal.get("big"))
             except RuntimeError:
                 pass
-    for line in summarize(user, apps, statuses, receipt):
+    for line in summarize(user, apps, statuses, receipt, llm_history):
         print(line)
 
 
