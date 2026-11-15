@@ -70,7 +70,7 @@ def package(root: Path, voice_token: str) -> bytes:
 def multipart(zipbytes: bytes) -> tuple[bytes, str]:
     boundary = "jarvis-voice-" + secrets.token_hex(16)
     body = (f"--{boundary}\r\n"
-            'Content-Disposition: form-data; name="file"; filename="jarvis-voice.zip"\r\n'
+            'Content-Disposition: form-data; name="jarvis-voice.zip"; filename="jarvis-voice.zip"\r\n'
             "Content-Type: application/zip\r\n\r\n").encode()
     body += zipbytes + f"\r\n--{boundary}--\r\n".encode()
     return body, f"multipart/form-data; boundary={boundary}"
@@ -87,7 +87,19 @@ def api(token: str, method: str, path: str, body: bytes | None = None,
         with urllib.request.urlopen(req, timeout=120) as response:
             value = json.loads(response.read(524288))
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Discloud HTTP {exc.code} on {method} {path}") from None
+        try:
+            error_body = json.loads(exc.read(4096))
+            detail = error_body.get("message", "") if isinstance(error_body, dict) else ""
+            if not isinstance(detail, str):
+                detail = ""
+            # Never echo either credential even if a remote error includes one.
+            detail = detail.replace(token, "[REDACTED]")
+            detail = detail.replace(private_token(token), "[REDACTED]")
+            detail = "".join(c for c in detail if c.isprintable())[:220]
+        except (ValueError, UnicodeDecodeError):
+            detail = ""
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"Discloud HTTP {exc.code} on {method} {path}{suffix}") from None
     except urllib.error.URLError as exc:
         raise RuntimeError("Cannot reach Discloud API") from exc
     if not isinstance(value, dict) or value.get("status") != "ok":

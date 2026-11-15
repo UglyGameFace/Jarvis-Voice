@@ -13,6 +13,14 @@ from scripts import deploy_discloud as d
 class DeploymentTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
 
+    def test_discloud_uses_filename_for_multipart_form_field(self):
+        # The official Discloud REST library appends files under file.name,
+        # not under a generic 'file' form field.
+        blob, mime = d.multipart(b"testzip")
+        self.assertIn(b'name="jarvis-voice.zip"; filename="jarvis-voice.zip"', blob)
+        self.assertIn(b"testzip", blob)
+        self.assertTrue(mime.startswith("multipart/form-data; boundary="))
+
     def test_private_token_is_stable_separate(self):
         account = "test-discloud-token-example-32-plus-characters"
         one = d.private_token(account)
