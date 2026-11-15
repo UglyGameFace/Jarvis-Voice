@@ -15,6 +15,15 @@ class AuditTests(unittest.TestCase):
         x=a.latest_receipt("memory_receipt current_mb=200 peak_mb=300 oom_kills=0\n"
                            "memory_receipt current_mb=400 peak_mb=950 oom_kills=0\n")
         self.assertEqual(x, {"current_mb":400,"peak_mb":950,"oom_kills":0})
+    def test_max_history_not_confused_with_all_time_peak(self):
+        history=a.memory_receipt_summary(
+            "memory_receipt current_mb=400 limit_mb=4088 oom_kills=0\n"
+            "memory_receipt current_mb=1600 limit_mb=4088 oom_kills=0\n"
+            "memory_receipt current_mb=700 limit_mb=4088 oom_kills=0\n")
+        self.assertEqual(history["observations"],3)
+        self.assertEqual(history["max_observed_current_mb"],1600)
+        self.assertEqual(history["max_reported_oom_kills"],0)
+
     def test_redacts_unknown_app_names(self):
         rows=a.summarize(
           {"totalRamMb":8192,"ramUsedMb":7650},
