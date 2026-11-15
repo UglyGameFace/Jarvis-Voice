@@ -1,4 +1,4 @@
-name: JARVIS Voice CI and Discloud deploy
+name: JARVIS Voice test and deploy
 
 on:
   push:
@@ -10,59 +10,39 @@ permissions:
   contents: read
 
 concurrency:
-  group: jarvis-voice-${{ github.ref }}
+  group: jarvis-voice-deploy
   cancel-in-progress: false
 
 jobs:
   tests:
-    name: Python tests and deploy package checks
+    name: Validate Python service and deployment
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: pip
-      - name: Install lightweight test dependency only
+      - name: Install small unit-test dependency
         run: python -m pip install 'numpy>=1.26,<3'
-      - name: Compile and run unit tests
+      - name: Run tests and package checks
         run: |
-          python -m compileall -q server.py tests
+          python -m compileall -q server.py scripts tests
           python -m unittest discover -s tests -v
-      - name: Reject credentials or model weights from tracked files
-        run: python scripts/verify_repo.py
+          python scripts/verify_repo.py
 
   deploy:
-    name: Deploy to dedicated Discloud voice app
+    name: Provision or update dedicated Discloud voice app
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [tests]
-    # Gate prevents first push from deploying an unbenchmarked model. Enable
-    # the variable only after the dedicated app and real host are accepted.
-    if: >-
-      github.event_name != 'pull_request' &&
-      github.ref == 'refs/heads/main' &&
-      vars.JARVIS_VOICE_AUTO_DEPLOY == 'true'
     runs-on: ubuntu-latest
-    environment: jarvis-voice-production
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Require dedicated app credentials
+      - name: Deploy only Jarvis-Voice (create if missing)
         env:
           DISCLOUD_TOKEN: ${{ secrets.DISCLOUD_TOKEN }}
-          DISCLOUD_VOICE_APP_ID: ${{ secrets.DISCLOUD_VOICE_APP_ID }}
-        shell: bash
-        run: |
-          if [[ -z "$DISCLOUD_TOKEN" || -z "$DISCLOUD_VOICE_APP_ID" ]]; then
-            echo '::error::Configure DISCLOUD_TOKEN and DISCLOUD_VOICE_APP_ID as repository Actions secrets before enabling deploy.'
-            exit 1
-          fi
-      - name: Upload only runtime files to Discloud
-        uses: discloud/deploy-action@fae7024653d941a19daa2b6f56d2ae208e008c54 # v1, immutable commit
-        with:
-          token: ${{ secrets.DISCLOUD_TOKEN }}
-          app_id: ${{ secrets.DISCLOUD_VOICE_APP_ID }}
-          glob: |
-            discloud.config
-            server.py
-            requirements.txt
-      - name: Deployment handoff
-        run: echo 'Files handed to Discloud; inspect service logs and authenticated on-host speech before claiming healthy production.'
+          JARVIS_VOICE_TOKEN: ${{ secrets.JARVIS_VOICE_TOKEN }}
+        run: python scripts/deploy_discloud.py
+      - name: Explain verification boundary
+        run: echo "Discloud upload submitted. Real model inference, RAM, and private VLAN access still require host validation."
