@@ -1,0 +1,20 @@
+# Credentials, model files, generated binary packages, and caches
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.cache/
+.cache*/
+model_cache/
+*.gguf
+*.onnx
+*.pt
+*.pth
+*.safetensors
+*.wav
+*.mp3
+*.zip

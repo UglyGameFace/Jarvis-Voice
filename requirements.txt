@@ -1,0 +1,4 @@
+# Heavy CPU packages are deliberately separate from RivaL's llama.cpp runtime.
+kokoro==0.9.4
+numpy>=1.26,<3
+# Kokoro installs torch and its phonemizer; espeak-ng must exist on the host.
