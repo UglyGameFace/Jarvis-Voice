@@ -24,6 +24,20 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(history["max_observed_current_mb"],1600)
         self.assertEqual(history["max_reported_oom_kills"],0)
 
+    def test_unknown_apps_display_numeric_usage_without_names(self):
+        report=a.summarize(
+            {"totalRamMb":8192,"ramUsedMb":7650},
+            [{"name":"unlisted-helper","ram":512,"online":True},
+             {"name":"unlisted-minecraft","ram":256,"online":True}],
+            {"unlisted-helper":{"memory":"98 MB"},
+             "unlisted-minecraft":{"memory":"240 MB"}},
+            None)
+        result="\n".join(report)
+        self.assertIn("Other #1: allocated=512MB online=True ramKilled=False instantaneous=98MB",result)
+        self.assertIn("Other #2: allocated=256MB online=True ramKilled=False instantaneous=240MB",result)
+        self.assertNotIn("unlisted-helper",result)
+        self.assertNotIn("unlisted-minecraft",result)
+
     def test_redacts_unknown_app_names(self):
         rows=a.summarize(
           {"totalRamMb":8192,"ramUsedMb":7650},
@@ -35,6 +49,7 @@ class AuditTests(unittest.TestCase):
         self.assertIn("free=542",out)
         self.assertIn("instantaneous=608MB",out)
         self.assertIn("count=1 allocated=768",out)
+        self.assertIn("Other #1: allocated=768MB online=False",out)
         self.assertNotIn("private-app-secret",out)
 
 
