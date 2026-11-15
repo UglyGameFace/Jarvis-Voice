@@ -75,7 +75,7 @@ def summarize(user, apps, statuses, llm_receipt, llm_history=None):
     if type(total) is not int or type(allocated) is not int or not 0 <= allocated <= total:
         raise ValueError("Discloud account RAM unavailable")
     out = [f"Account: total={total} MB allocated={allocated} MB free={total-allocated} MB"]
-    unknown_count, unknown_ram = 0, 0
+    unknown_count, unknown_ram, other_apps = 0, 0, []
     for app in sorted(apps, key=lambda v: str(v.get("name", ""))):
         name, ram = app.get("name"), app.get("ram")
         if type(ram) not in (int, float) or ram < 0:
@@ -84,6 +84,7 @@ def summarize(user, apps, statuses, llm_receipt, llm_history=None):
         if name not in KNOWN:
             unknown_count += 1
             unknown_ram += ram
+            other_apps.append((ram, bool(app.get("online")), bool(app.get("ramKilled")), usage_mb(statuses.get(name, {}).get("memory"))))
             continue
         status = statuses.get(name, {})
         used = usage_mb(status.get("memory"))
@@ -93,6 +94,8 @@ def summarize(user, apps, statuses, llm_receipt, llm_history=None):
         out.append(f"App {name}: allocated={ram}MB online={bool(app.get('online'))} "
                    f"ramKilled={bool(app.get('ramKilled'))} instantaneous={used if used is not None else '?'}MB cpu={cpu_text}")
     out.append(f"Other apps (names hidden): count={unknown_count} allocated={unknown_ram}MB")
+    for index, (ram, online, killed, now) in enumerate(sorted(other_apps, reverse=True), start=1):
+        out.append(f"Other #{index}: allocated={ram}MB online={online} ramKilled={killed} instantaneous={now if now is not None else chr(63)}MB")
     if llm_receipt:
         out.append("LFM3 latest container memory receipt: " +
                    " ".join(f"{k}={llm_receipt[k]}" for k in
@@ -119,7 +122,7 @@ def main():
     statuses, receipt, llm_history = {}, None, None
     for app in apps:
         name, app_id = app.get("name"), app.get("id")
-        if (name not in KNOWN or not isinstance(app_id, str)
+        if (not isinstance(app_id, str)
             or not re.fullmatch(r"[A-Za-z0-9_-]+", app_id)):
             continue
         if app.get("online"):
