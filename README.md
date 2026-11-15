@@ -1,54 +1,38 @@
-# Jarvis Voice | self-hosted speech service
+# JARVIS Voice
 
-A standalone private CPU text-to-speech service for `jarvis.the420lobby.com`. Kokoro 82M provides British male speech by default (`bm_george`, 0.94 speed); Clive from Cartesia remains off unless explicitly enabled and selected. LFM3 generates the text, not audio. This service stays separate from `UglyGameFace/RivaL-Intelligence` and its source mirror.
+Private, standalone Kokoro speech service with British voices. Its default is `bm_george` at speed `0.94`. Cartesia Clive is disabled unless explicitly enabled.
 
-## Repository and automatic deployment
+## GitHub -> Discloud
 
-This is a GitHub-repository-ready source tree. Create a **private** repository named `UglyGameFace/Jarvis-Voice` with default branch `main`, upload these files to its root (not inside a folder), and use the GitHub Actions workflow at `.github/workflows/voice-ci-deploy.yml`. The GitHub connector in the current ChatGPT session cannot create a new repository, so the archive does **not** represent a pushed repository or live deployment.
+Only one GitHub Actions secret is required to bootstrap and deploy: `DISCLOUD_TOKEN`. On every push to `main`, the workflow must pass the Python tests and package checks before `scripts/deploy_discloud.py` runs.
 
-For the first provisioning of the *separate* `Jarvis-Voice` Discloud app, upload once from Discloud's Dashboard with this root `discloud.config`. The host must have sufficient free account allocation **in addition** to the existing LFM3 service. The 2048 MB configured limit is an unbenchmarked provisional size and can change after measurement. If the voice app is created under another app ID, configure the action's `DISCLOUD_VOICE_APP_ID` accordingly. Add `JARVIS_VOICE_TOKEN` (random 32+ characters) as a Discloud environment variable; don't store it in GitHub or the frontend. Start with `JARVIS_CARTESIA_ENABLED=false`.
+The deployment script uses Discloud's authenticated API to find the one app named `Jarvis-Voice`, verifies that its main file is `server.py`, and updates that app. If no matching app exists, it creates a separate application from `discloud.config` (`TYPE=bot`, `VLAN=true`, `RAM=2048`). It refuses duplicate names or a conflicting app. It never targets `RivaL-Intelligence` or changes its configured 2450 MB. Insufficient Discloud account RAM may prevent the new app from being created.
 
-Once its first synthesis and memory baseline are validated, in the new GitHub repository set:
+**No `DISCLOUD_VOICE_APP_ID` secret or `JARVIS_VOICE_AUTO_DEPLOY` variable is needed now.** Do not enable Discloud's separate native GitHub auto-deploy alongside this workflow.
 
-- Actions secrets: `DISCLOUD_TOKEN` (Discloud account API token) and `DISCLOUD_VOICE_APP_ID` (voice app ID, **not** LFM3/RivaL's ID).
-- Actions variable: `JARVIS_VOICE_AUTO_DEPLOY` = `true`.
+### Private voice authentication
 
-After this, every push to `main` runs lightweight checks and, **only after they pass**, the official pinned Discloud deploy action uploads the runtime files to the specific voice app. Pull requests run tests only. Do **not** simultaneously enable Discloud's own GitHub auto-deploy, because this workflow already handles deployment and double redeploys would cause unnecessary downtime.
+The script derives a stable, separate 43-character voice credential from the Discloud API token using HMAC-SHA256. It is neither logged nor committed: the deployment sends it only in a temporary `.env` inside the private Discloud upload. If you prefer an independent credential, add the optional GitHub Actions secret `JARVIS_VOICE_TOKEN` (32-256 characters). Changing the account token also rotates the derived voice credential. The future Jarvis web backend must use the matching private voice credential, never expose it to browsers, and coordinate any rotation.
 
-CI success proves only source tests. The Discloud deploy step confirms an upload, **not** a serving, warmed-up Kokoro model. Inspect the private status route and synthesize real audio after rollout. Model downloads, Python/Torch dependencies and CPU performance require platform verification. No model weights or secrets are tracked.
+### Tests
 
-## Host requirements and caveats
+```sh
+python -m pip install 'numpy>=1.26,<3'
+python -m compileall -q server.py scripts tests
+python -m unittest discover -s tests -v
+python scripts/verify_repo.py
+```
 
-- Python 3.11, Linux CPU, supported PyTorch wheels, outbound access to Kokoro model downloads, writable private model cache.
-- `kokoro==0.9.4` and numerical dependencies from `requirements.txt`. British English's Misaki G2P may work without eSpeak, but unknown words can be skipped when `espeak-ng` is unavailable. Discloud's documented APT list does **not** explicitly include `espeak-ng`; verify it on the target host rather than assuming it can be installed via `APT`.
-- Host service binds `0.0.0.0:8777` only within Discloud's private VLAN. Never expose port 8777 publicly or call it directly from the browser. An authenticated Jarvis backend route must proxy text to this service using a separate private token, rate limit users, and relay WAV responses.
-- `RAM=2048` in `discloud.config` is **not** proof this is enough. Preserve the LFM3 app's existing configured `RAM=2450` unchanged. Benchmark idle RSS, synthesis peak RSS, CPU load, restart/OOM logs, p95 latency and capacity over at least 10 distinct phrases before enabling deployment automation.
+## HTTP API
 
-## API
-
-`GET /v1/status` with `Authorization: Bearer $JARVIS_VOICE_TOKEN` returns readiness and approximate RSS. Does not load weights.
-
-`POST /v1/speak` with the same bearer header and JSON body:
+The private Discloud service binds `0.0.0.0:8777` on the VLAN and requires an `Authorization: Bearer <JARVIS_VOICE_TOKEN>` header for `GET /v1/status` and `POST /v1/speak`. Synthesis request example:
 
 ```json
 {"text":"Good evening. JARVIS online.","voice":"bm_george","speed":0.94,"provider":"kokoro"}
 ```
 
-Returns `audio/wav`. Max 480 text characters, one concurrent inference, max 4MB audio. Requests may respond 429 when busy or 503 for memory pressure. Call it from a private backend over `http://jarvis-voice:8777` only, not from the phone browser.
+Output is WAV. Four Kokoro British male options are available, and Cartesia requires an additional private API key and deliberate provider selection.
 
-For premium Clive, set `JARVIS_CARTESIA_ENABLED=true` and the private `CARTESIA_API_KEY` at the server, then explicitly request `provider=clive`. There is **no automatic paid fallback**.
+**Current limitations:** GitHub Actions has repeatedly failed before a runner starts, so no new remote tests or deployments are verified. This may require investigation of repository Actions permissions, runner provisioning, or billing. A successful upload in the future will still not prove actual Kokoro model inference, memory headroom, or Cloudflare-to-Discloud connectivity. Cloudflare cannot simply call a private VLAN hostname: Jarvis needs a separate secure backend bridge.
 
-## Manual development tests
-
-```sh
-python -m pip install 'numpy>=1.26,<3'
-python -m compileall -q server.py tests
-python -m unittest discover -s tests -v
-python scripts/verify_repo.py
-```
-
-Testing the real model additionally requires `pip install -r requirements.txt` and host provisioning. The unit tests mock inference and do not assert live audio or deployment. See `.env.example` for private variables, `web/jarvis-voice-client.mjs` for the browser-side audio player to integrate **after** Jarvis has an authenticated server-side proxy, and `STATUS.md` for current evidence.
-
-### Fastest Android/Termux first-time repository creation
-
-After downloading and extracting the ZIP in Termux, install `pkg install git gh python unzip -y`, change into the extracted `jarvis-voice-repo-ready` folder and run `bash scripts/publish-from-termux.sh`. The script checks your current GitHub login, uses GitHub's own browser authorization if needed, creates a **private** `UglyGameFace/Jarvis-Voice` repository, and pushes the source to `main`. It refuses to overwrite an existing repository or switch accounts. It cannot run without the owner's GitHub login, and it does not create or authorize a Discloud app. The existing ChatGPT GitHub connector cannot perform initial repository creation itself.
+See `STATUS.md` for the current state.
