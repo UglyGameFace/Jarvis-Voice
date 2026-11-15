@@ -111,6 +111,25 @@ def deploy(root: Path, account_token: str, override: str = "") -> tuple[str, str
     private = private_token(account_token, override)
     contents = package(root, private)
     existing = app_id_for(api(account_token, "GET", "/app/all").get("apps"))
+    if existing is None:
+        # Do not guess at smaller allocations or touch other running apps.
+        user = api(account_token, "GET", "/user").get("user") or {}
+        total = user.get("totalRamMb")
+        used = user.get("ramUsedMb")
+        if (type(total) is not int or type(used) is not int
+                or not 0 <= used <= total):
+            raise RuntimeError("Discloud account RAM totals unavailable; refusing blind create")
+        requested = next((int(line.partition("=")[2]) for line in
+                          (root / "discloud.config").read_text().splitlines()
+                          if line.startswith("RAM=")), None)
+        if requested is None:
+            raise RuntimeError("Missing voice application RAM request")
+        available = total - used
+        print(f"Discloud RAM preflight: total={total} MB, allocated={used} MB, "
+              f"free={available} MB, requested={requested} MB")
+        if requested > available:
+            raise RuntimeError(f"Voice app needs {requested} MB, but only "
+                               f"{available} MB of account allocation remains")
     body, mime = multipart(contents)
     if existing:
         api(account_token, "PUT", f"/app/{existing}/commit", body, mime)

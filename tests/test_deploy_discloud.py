@@ -63,13 +63,24 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(api.call_args_list[1].args[1:3],
                              ("PUT", "/app/voice-1/commit"))
 
+    def test_insufficient_ram_never_attempts_upload_or_changes_other_apps(self):
+        with patch.object(d, "api", side_effect=[
+            {"status":"ok","apps":[{"name":"RivaL Intelligence","id":"rival","mainFile":"main.py"}]},
+            {"status":"ok","user":{"totalRamMb":4000,"ramUsedMb":3500}}]) as api:
+            with self.assertRaisesRegex(RuntimeError, "only 500 MB"):
+                d.deploy(self.root, "t" * 48)
+            self.assertEqual(api.call_count, 2)
+            self.assertEqual(api.call_args_list[1].args[1:3], ("GET", "/user"))
+
     def test_initial_creation_and_wrong_app_detection(self):
         with patch.object(d, "api", side_effect=[
             {"status":"ok","apps":[{"name":"RivaL Intelligence","id":"rival","mainFile":"main.py"}]},
+            {"status":"ok","user":{"totalRamMb":6000,"ramUsedMb":3500}},
             {"status":"ok","app":{"name":"Jarvis-Voice","id":"voice-new","mainFile":"server.py"}}]) as api:
             actual = d.deploy(self.root, "t" * 48)
             self.assertEqual(actual, ("voice-new","created"))
-            self.assertEqual(api.call_args_list[1].args[1:3], ("POST", "/upload"))
+            self.assertEqual(api.call_args_list[1].args[1:3], ("GET", "/user"))
+            self.assertEqual(api.call_args_list[2].args[1:3], ("POST", "/upload"))
         with patch.object(d, "api", return_value={"status":"ok","apps":[
             {"name":"Jarvis-Voice","id":"rival","mainFile":"main.py"}]}) as api:
             with self.assertRaises(ValueError):
